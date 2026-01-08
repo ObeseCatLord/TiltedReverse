@@ -5,7 +5,7 @@ set_xmakever("2.6.0")
 
 -- direct dependency version pinning
 add_requires(
-    "tiltedcore v0.2.7", 
+    "tiltedcore", 
     "hopscotch-map v2.3.1", 
     "minhook v1.3.3", 
     "catch2 2.13.9", 
