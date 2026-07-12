@@ -2,6 +2,8 @@
 
 #include <Windows.h>
 
+#include <cstddef>
+
 #include <TiltedCore/Stl.hpp>
 #include <Memory.hpp>
 
@@ -26,6 +28,16 @@ namespace TiltedPhoques
         void** m_ppDetourFunction;
         void* m_pSystemFunction;
         void* m_pHookFunction;
+        bool m_ownsHook{false};
+    };
+
+    struct HookInstallSummary
+    {
+        std::size_t DelayedAttempted{};
+        std::size_t DelayedInstalled{};
+        std::size_t ImmediateAttempted{};
+        std::size_t ImmediateInstalled{};
+        std::size_t Failures{};
     };
 
     class FunctionHookManager
@@ -46,7 +58,7 @@ namespace TiltedPhoques
         FunctionHookManager& operator=(const FunctionHookManager&) = delete;
         FunctionHookManager& operator=(FunctionHookManager&&) = delete;
 
-        void InstallDelayedHooks() noexcept;
+        HookInstallSummary InstallDelayedHooks() noexcept;
         void UninstallHooks() noexcept;
 
         void Add(FunctionHook aFunctionHook, bool aDelayed = false) noexcept;
@@ -87,6 +99,7 @@ namespace TiltedPhoques
         Vector<FunctionHook> m_delayedHooks;
         Vector<FunctionHook> m_installedHooks;
         Vector<IATHook> m_iatHooks;
+        HookInstallSummary m_installSummary;
     };
 
     template<class T, class Func>

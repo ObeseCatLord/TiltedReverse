@@ -25,7 +25,7 @@ namespace TiltedPhoques
 
     FunctionHook::~FunctionHook() noexcept
     {
-        if (m_ppDetourFunction != nullptr)
+        if (m_ownsHook && m_ppDetourFunction != nullptr)
         {
             MH_DisableHook(m_pSystemFunction);
             MH_RemoveHook(m_pSystemFunction);
@@ -43,6 +43,7 @@ namespace TiltedPhoques
         std::swap(m_ppDetourFunction, aRhs.m_ppDetourFunction);
         std::swap(m_pSystemFunction, aRhs.m_pSystemFunction);
         std::swap(m_pHookFunction, aRhs.m_pHookFunction);
+        std::swap(m_ownsHook, aRhs.m_ownsHook);
 
         return *this;
     }
@@ -59,16 +60,35 @@ namespace TiltedPhoques
         MH_Uninitialize();
     }
 
-    void FunctionHookManager::InstallDelayedHooks() noexcept
+    HookInstallSummary FunctionHookManager::InstallDelayedHooks() noexcept
     {
         for (auto& hook : m_delayedHooks)
         {
-            MH_CreateHook(hook.m_pSystemFunction, hook.m_pHookFunction, hook.m_ppDetourFunction);
-            MH_EnableHook(hook.m_pSystemFunction);
+            ++m_installSummary.DelayedAttempted;
+            const auto createStatus = MH_CreateHook(hook.m_pSystemFunction, hook.m_pHookFunction, hook.m_ppDetourFunction);
+            if (createStatus != MH_OK)
+            {
+                ++m_installSummary.Failures;
+                OutputDebugStringA("SkyrimTogetherVR: delayed MinHook creation failed.\n");
+                continue;
+            }
+
+            const auto enableStatus = MH_EnableHook(hook.m_pSystemFunction);
+            if (enableStatus != MH_OK)
+            {
+                MH_RemoveHook(hook.m_pSystemFunction);
+                ++m_installSummary.Failures;
+                OutputDebugStringA("SkyrimTogetherVR: delayed MinHook enable failed.\n");
+                continue;
+            }
+
+            hook.m_ownsHook = true;
             m_installedHooks.emplace_back(std::move(hook));
+            ++m_installSummary.DelayedInstalled;
         }
 
         m_delayedHooks.clear();
+        return m_installSummary;
     }
 
     void FunctionHookManager::UninstallHooks() noexcept
@@ -76,9 +96,10 @@ namespace TiltedPhoques
         for (size_t i = 0; i < m_installedHooks.size(); ++i)
         {
             m_installedHooks[i].m_ppDetourFunction = nullptr;
+            m_installedHooks[i].m_ownsHook = false;
         }
 
-        //Mhook_UnhookEx(pHooks, m_installedHooks.size());
+        // Mhook_UnhookEx(pHooks, m_installedHooks.size());
 
         m_installedHooks.clear();
 
@@ -93,9 +114,30 @@ namespace TiltedPhoques
     {
         if (aDelayed)
             m_delayedHooks.emplace_back(std::move(aFunctionHook));
-        else if (MH_CreateHook(aFunctionHook.m_pSystemFunction, aFunctionHook.m_pHookFunction, aFunctionHook.m_ppDetourFunction) == MH_OK &&
-                 MH_EnableHook(aFunctionHook.m_pSystemFunction) == MH_OK)
+        else
+        {
+            ++m_installSummary.ImmediateAttempted;
+            const auto createStatus = MH_CreateHook(aFunctionHook.m_pSystemFunction, aFunctionHook.m_pHookFunction, aFunctionHook.m_ppDetourFunction);
+            if (createStatus != MH_OK)
+            {
+                ++m_installSummary.Failures;
+                OutputDebugStringA("SkyrimTogetherVR: immediate MinHook creation failed.\n");
+                return;
+            }
+
+            const auto enableStatus = MH_EnableHook(aFunctionHook.m_pSystemFunction);
+            if (enableStatus != MH_OK)
+            {
+                MH_RemoveHook(aFunctionHook.m_pSystemFunction);
+                ++m_installSummary.Failures;
+                OutputDebugStringA("SkyrimTogetherVR: immediate MinHook enable failed.\n");
+                return;
+            }
+
+            aFunctionHook.m_ownsHook = true;
             m_installedHooks.emplace_back(std::move(aFunctionHook));
+            ++m_installSummary.ImmediateInstalled;
+        }
     }
 
     void* FunctionHookManager::Add(void* apFunctionDetour, const char* acpLibraryName, const char* acpMethod) noexcept
