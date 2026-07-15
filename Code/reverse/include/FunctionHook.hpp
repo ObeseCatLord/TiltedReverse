@@ -76,8 +76,22 @@ namespace TiltedPhoques
             const auto module = LoadLibraryA(acLibraryName.c_str());
             if (module != nullptr)
             {
-                auto pSystemFunction = reinterpret_cast<void*>(GetProcAddress(module, acFunctionName.c_str()));
+                const auto pTargetFunction = reinterpret_cast<void*>(GetProcAddress(module, acFunctionName.c_str()));
+                if (pTargetFunction == nullptr)
+                    return nullptr;
+
+                auto pSystemFunction = pTargetFunction;
+                const auto installedCount = m_installedHooks.size();
                 Add(&pSystemFunction, apFunction, false);
+
+                // AddSystem returns the trampoline through a local variable. Do
+                // not retain its stack address as a restoration destination.
+                if (m_installedHooks.size() == installedCount + 1)
+                {
+                    auto& hook = m_installedHooks.back();
+                    if (hook.m_pSystemFunction == pTargetFunction && hook.m_ppDetourFunction == &pSystemFunction)
+                        hook.m_ppDetourFunction = nullptr;
+                }
 
                 return pSystemFunction;
             }
