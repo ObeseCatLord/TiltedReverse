@@ -25,10 +25,13 @@ namespace TiltedPhoques
 
     FunctionHook::~FunctionHook() noexcept
     {
-        if (m_ownsHook && m_ppDetourFunction != nullptr)
+        if (m_ownsHook)
         {
             MH_DisableHook(m_pSystemFunction);
             MH_RemoveHook(m_pSystemFunction);
+            if (m_ppDetourFunction)
+                *m_ppDetourFunction = m_pSystemFunction;
+            m_ownsHook = false;
         }
     }
 
@@ -62,6 +65,14 @@ namespace TiltedPhoques
 
     HookInstallSummary FunctionHookManager::InstallDelayedHooks() noexcept
     {
+        if (m_installSummary.Failures != 0)
+        {
+            OutputDebugStringA("SkyrimTogetherVR: rolling back hooks after an earlier MinHook failure.\n");
+            UninstallHooks();
+            m_delayedHooks.clear();
+            return m_installSummary;
+        }
+
         for (auto& hook : m_delayedHooks)
         {
             ++m_installSummary.DelayedAttempted;
@@ -70,7 +81,7 @@ namespace TiltedPhoques
             {
                 ++m_installSummary.Failures;
                 OutputDebugStringA("SkyrimTogetherVR: delayed MinHook creation failed.\n");
-                continue;
+                break;
             }
 
             const auto enableStatus = MH_EnableHook(hook.m_pSystemFunction);
@@ -79,7 +90,7 @@ namespace TiltedPhoques
                 MH_RemoveHook(hook.m_pSystemFunction);
                 ++m_installSummary.Failures;
                 OutputDebugStringA("SkyrimTogetherVR: delayed MinHook enable failed.\n");
-                continue;
+                break;
             }
 
             hook.m_ownsHook = true;
@@ -88,26 +99,38 @@ namespace TiltedPhoques
         }
 
         m_delayedHooks.clear();
+        if (m_installSummary.Failures != 0)
+        {
+            OutputDebugStringA("SkyrimTogetherVR: rolling back all hooks after a delayed MinHook failure.\n");
+            UninstallHooks();
+        }
         return m_installSummary;
     }
 
     void FunctionHookManager::UninstallHooks() noexcept
     {
-        for (size_t i = 0; i < m_installedHooks.size(); ++i)
+        for (auto it = m_installedHooks.rbegin(); it != m_installedHooks.rend(); ++it)
         {
-            m_installedHooks[i].m_ppDetourFunction = nullptr;
-            m_installedHooks[i].m_ownsHook = false;
-        }
+            auto& hook = *it;
+            if (!hook.m_ownsHook)
+                continue;
 
-        // Mhook_UnhookEx(pHooks, m_installedHooks.size());
+            MH_DisableHook(hook.m_pSystemFunction);
+            MH_RemoveHook(hook.m_pSystemFunction);
+            if (hook.m_ppDetourFunction)
+                *hook.m_ppDetourFunction = hook.m_pSystemFunction;
+            hook.m_ownsHook = false;
+        }
 
         m_installedHooks.clear();
 
-        for (auto& iatHook : m_iatHooks)
+        for (auto it = m_iatHooks.rbegin(); it != m_iatHooks.rend(); ++it)
         {
+            auto& iatHook = *it;
             const vp::ScopedContext thunkMemory(iatHook.pThunk, sizeof(iatHook.pThunk));
             thunkMemory.Write(iatHook.pOriginal);
         }
+        m_iatHooks.clear();
     }
 
     void FunctionHookManager::Add(FunctionHook aFunctionHook, const bool aDelayed) noexcept
